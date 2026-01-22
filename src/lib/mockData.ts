@@ -10,7 +10,7 @@ export interface User {
 
 export const users: User[] = [
   { id: '1', username: 'admin', password: 'admin123', name: 'Dr. Maria Santos', role: 'admin' },
-  { id: '2', username: 'librarian', password: 'lib123', name: 'Juan Dela Cruz', role: 'librarian' },
+  { id: '2', username: 'lib', password: 'lib123', name: 'Ms. Leonesa Maghuyop', role: 'librarian' },
 ];
 
 // Mock Books
