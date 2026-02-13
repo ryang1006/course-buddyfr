@@ -11,6 +11,7 @@ interface ProtectedRouteProps {
 export function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) {
   const { user, isLoading } = useAuth();
 
+  // 1. Keep the loading state as is
   if (isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
@@ -19,11 +20,15 @@ export function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) 
     );
   }
 
+  // 2. Redirect to login if no session exists
   if (!user) {
     return <Navigate to="/login" replace />;
   }
 
-  if (requiredRole && user.role !== requiredRole && user.role !== 'admin') {
+  // 3. Updated Role Check: Accessing metadata.role from Supabase
+  const userRole = user.user_metadata?.role;
+
+  if (requiredRole && userRole !== requiredRole && userRole !== 'admin') {
     return <Navigate to="/dashboard" replace />;
   }
 

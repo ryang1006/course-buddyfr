@@ -1,9 +1,10 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { User, users } from '@/lib/mockData';
+import { supabase } from '@/lib/supabaseClient'; // Ensure this path is correct
+import { User } from '@supabase/supabase-js';
 
 interface AuthContextType {
   user: User | null;
-  login: (username: string, password: string) => Promise<boolean>;
+  login: (email: string, password: string) => Promise<boolean>;
   logout: () => void;
   isLoading: boolean;
 }
@@ -15,33 +16,39 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Check for saved session
-    const savedUser = localStorage.getItem('mcclrs_user');
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
-    }
-    setIsLoading(false);
+    // 1. Initial Session Check
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      setIsLoading(false);
+    });
+
+    // 2. Listen for Auth State Changes (Login/Logout)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      setIsLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  const login = async (username: string, password: string): Promise<boolean> => {
-    // Simulate API call delay
-    await new Promise(resolve => setTimeout(resolve, 800));
+  const login = async (email: string, password: string): Promise<boolean> => {
+    setIsLoading(true);
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
     
-    const foundUser = users.find(
-      u => u.username === username && u.password === password
-    );
-    
-    if (foundUser) {
-      setUser(foundUser);
-      localStorage.setItem('mcclrs_user', JSON.stringify(foundUser));
-      return true;
+    setIsLoading(false);
+    if (error) {
+      console.error("Login Error:", error.message);
+      return false;
     }
-    return false;
+    return !!data.user;
   };
 
-  const logout = () => {
+  const logout = async () => {
+    await supabase.auth.signOut();
     setUser(null);
-    localStorage.removeItem('mcclrs_user');
   };
 
   return (

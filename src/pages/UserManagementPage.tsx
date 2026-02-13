@@ -1,5 +1,6 @@
 import { MainLayout } from '@/components/layout/MainLayout';
-import { users } from '@/lib/mockData';
+import { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabaseClient';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -15,6 +16,23 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
 export default function UserManagementPage() {
+  const [dbUsers, setDbUsers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchUsers() {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*');
+      
+      if (!error && data) {
+        setDbUsers(data);
+      }
+      setLoading(false);
+    }
+    fetchUsers();
+  }, []);
+
   const handleEdit = (userId: string) => {
     toast.info('User editing is a demo feature');
   };
@@ -50,7 +68,7 @@ export default function UserManagementPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {users.map((user) => (
+            {dbUsers.map((user) => (
               <TableRow key={user.id} className="hover:bg-muted/50">
                 <TableCell>
                   <div className="flex items-center gap-3">

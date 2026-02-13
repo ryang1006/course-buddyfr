@@ -19,20 +19,25 @@ export default function LoginPage() {
   const [error, setError] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setIsLoading(true);
+      e.preventDefault();
+      setError('');
+      setIsLoading(true);
 
-    const success = await login(username, password);
+      // Convert username to the email format you used in Supabase
+      const email = `${username}@mapua.edu.ph`;
+      console.log("SENDING TO SUPABASE:", { username, password });
+      const success = await login(email, password); // AuthContext now uses email
+      
+      if (success) {
+        navigate('/dashboard');
+      } else {
+        setError('Invalid username or password');
+      }
+      
+      setIsLoading(false);
+    };
+
     
-    if (success) {
-      navigate('/dashboard');
-    } else {
-      setError('Invalid username or password');
-    }
-    
-    setIsLoading(false);
-  };
 
   return (
     <div className="min-h-screen flex">
@@ -65,6 +70,7 @@ export default function LoginPage() {
             </div>
           </div>
         </div>
+
       </div>
 
       {/* Right Panel - Login Form */}
