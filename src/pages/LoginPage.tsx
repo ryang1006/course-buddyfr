@@ -65,7 +65,7 @@ export default function LoginPage() {
       const email = username.trim();
       console.log("SENDING TO SUPABASE:", { username, password });
       console.log("LOGIN ATTEMPT WITH:", email);
-      const success = await login(email, password); // AuthContext now uses email
+      const success = await login(email, password, rememberMe); // AuthContext now uses email
       
       if (success) {
         navigate('/dashboard');
@@ -244,11 +244,11 @@ export default function LoginPage() {
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
                 <p className="text-muted-foreground">Admin:</p>
-                <p className="font-mono">admin / admin123</p>
+                <p className="font-mono">admin@mapua.edu.ph / admin123</p>
               </div>
               <div>
                 <p className="text-muted-foreground">Librarian:</p>
-                <p className="font-mono">librarian / lib123</p>
+                <p className="font-mono">librarian@mapua.edu.ph / Mapua12345!</p>
               </div>
             </div>
           </div>

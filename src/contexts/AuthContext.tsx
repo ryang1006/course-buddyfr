@@ -1,11 +1,11 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { supabase } from '@/lib/supabaseClient'; 
+import { supabase, getSupabaseClient } from '@/lib/supabaseClient'; 
 import { User } from '@supabase/supabase-js';
 
 interface AuthContextType {
   user: User | null;
-  login: (email: string, password: string) => Promise<boolean>;
-  logout: () => Promise<void>; // Aligned to match the actual function
+  login: (email: string, password: string, rememberMe: boolean) => Promise<boolean>; 
+  logout: () => Promise<void>;
   isLoading: boolean;
 }
 
@@ -15,9 +15,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   
-  
   useEffect(() => {
     const handleAuth = async () => {
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+    if (session) {
+      console.log("-----------------------------------");
+      console.log(`🚀 APP RECOVERY: Logged in as ${session.user.email}`);
+      console.log(`🛡️ RECOVERED ROLE: ${session.user.user_metadata?.role}`);
+      console.log("-----------------------------------");
+      
+      const metadata = session.user.user_metadata;
+      setUser({
+        ...session.user,
+        // @ts-ignore
+        name: metadata?.full_name || session.user.email || 'Staff Member',
+        role: metadata?.role || 'librarian'
+      });
+    } else {
+      console.log("🚫 NO SESSION FOUND: Redirecting to login...");
+      setUser(null);
+    }
+    setIsLoading(false);
+      });
       // 1. Check URL for token_hash and type (Magic Link Support)
       const params = new URLSearchParams(window.location.search);
       const token_hash = params.get('token_hash'); // Corrected key name
@@ -41,18 +61,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // 3. Auth State Listener
       const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-        setUser(session?.user ?? null);
+        if (session?.user){
+          const metadata = session.user.user_metadata;
+
+          // Set user with all properties before turning off isLoading
+          setUser({
+            ...session.user,
+            // @ts-ignore
+            name: metadata?.full_name || session.user.email || 'Staff Member',
+            role: metadata?.role || 'librarian'
+          });
+        } else {
+          setUser(null);
+        }
         setIsLoading(false);
       });
-
-      return () => subscription.unsubscribe();
     };
 
     handleAuth();
   }, []);
 
-  const login = async (email: string, password: string): Promise<boolean> => {
+  const login = async (email: string, password: string, rememberMe: boolean): Promise<boolean> => {
     setIsLoading(true);
+    
+    const client = rememberMe ? supabase : getSupabaseClient(false);
+
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -65,6 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     if (data.user) {
+      console.log(`🔐 LOGGED IN AS: ${data.user.email} | ROLE: ${data.user.user_metadata?.role || 'librarian'}`);
     const metadata = data.user.user_metadata;
     const fallbackName = metadata?.full_name || data.user.email || 'Staff Member';
       // Mapping metadata to the 'name' and 'role' properties your Header/ProtectedRoutes expect

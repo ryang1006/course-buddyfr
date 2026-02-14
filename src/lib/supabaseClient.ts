@@ -8,5 +8,14 @@ console.log("Check Key Length:", supabaseKey?.length);
 console.log("URL check:", `|${import.meta.env.VITE_SUPABASE_URL}|`);
 console.log("KEY check:", `|${import.meta.env.VITE_SUPABASE_ANON_KEY}|`);
 
+export const getSupabaseClient = (persist: boolean = true) => {
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: persist, // If false, the session clears when the tab closes
+      storage: persist ? window.localStorage : window.sessionStorage,
+    },
+  });
+};
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+export const supabase = getSupabaseClient(true);
