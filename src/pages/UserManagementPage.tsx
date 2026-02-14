@@ -74,7 +74,7 @@ export default function UserManagementPage() {
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-full gradient-primary flex items-center justify-center">
                       <span className="text-white font-semibold text-sm">
-                        {user.name.split(' ').map(n => n[0]).join('')}
+                        {(user.name || 'User').split(' ').map(n => n[0]).join('')}
                       </span>
                     </div>
                     <div>

@@ -107,13 +107,16 @@ export function AppSidebar() {
           )}>
             <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
               <span className="text-white font-semibold text-sm">
-                {user.name.split(' ').map(n => n[0]).join('')}
+                {((user as any).name || 'Staff User')
+                  .split(' ')
+                  .map((n: string) => n[0])
+                  .join('')}
               </span>
             </div>
             {!collapsed && (
               <div className="animate-fade-in overflow-hidden">
-                <p className="text-white font-medium text-sm truncate">{user.name}</p>
-                <p className="text-white/60 text-xs capitalize">{user.role}</p>
+                <p className="text-white font-medium text-sm truncate">{(user as any).name}</p>
+                <p className="text-white/60 text-xs capitalize">{(user as any).role}</p>
               </div>
             )}
           </div>

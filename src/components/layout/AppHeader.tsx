@@ -48,17 +48,21 @@ export function AppHeader({ title, subtitle }: AppHeaderProps) {
           {/* User */}
           <div className="flex items-center gap-3 pl-4 border-l border-border">
             <div className="text-right hidden sm:block">
-              <p className="text-sm font-medium text-foreground">{user?.name}</p>
+              <p className="text-sm font-medium text-foreground">{(user as any)?.name || 'Staff'}</p>
               <Badge 
                 variant="secondary" 
-                className={user?.role === 'admin' ? 'bg-primary/10 text-primary' : 'bg-success/10 text-success'}
+                className={(user as any).role === 'admin' ? 'bg-primary/10 text-primary' : 'bg-success/10 text-success'}
               >
-                {user?.role === 'admin' ? 'Administrator' : 'Librarian'}
+                {(user as any).role === 'admin' ? 'Administrator' : 'Librarian'}
               </Badge>
             </div>
             <div className="w-10 h-10 rounded-full gradient-primary flex items-center justify-center">
               <span className="text-white font-semibold text-sm">
-                {user?.name.split(' ').map(n => n[0]).join('')}
+                {/* Safe split and map logic */}
+                    {((user as any)?.name || 'S')
+                      .split(' ')
+                      .map((n: string) => n[0])
+                      .join('')}
               </span>
             </div>
             <Button 
