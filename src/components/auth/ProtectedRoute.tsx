@@ -8,7 +8,7 @@ interface ProtectedRouteProps {
   requiredRole?: 'admin' | 'librarian';
 }
 
-export function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) {
+export default function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) {
   const { user, isLoading } = useAuth();
 
   // 1. Keep the loading state as is
@@ -16,6 +16,7 @@ export function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) 
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        return <div className="h-screen flex items-center justify-center">Verifying Identity...</div>;
       </div>
     );
   }
@@ -29,6 +30,7 @@ export function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) 
   const userRole = user.user_metadata?.role;
 
   if (requiredRole && userRole !== requiredRole && userRole !== 'admin') {
+    console.warn(`🚫 ACCESS DENIED: ${user.email} attempted to access ${requiredRole} area.`);
     return <Navigate to="/dashboard" replace />;
   }
 
