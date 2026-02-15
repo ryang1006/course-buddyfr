@@ -1,400 +1,226 @@
 import { useState } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { useData } from '@/contexts/DataContext';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import { 
   Upload, 
   Download, 
   FileSpreadsheet, 
-  FileText, 
-  CheckCircle, 
-  XCircle,
   FileDown,
-  Loader2
+  Loader2,
+  Database,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import { isBookRecent } from '@/lib/mockData';
 
-interface ImportRecord {
-  title: string;
-  author: string;
-  isbn: string;
-  publicationYear: number;
-  subjectCode: string;
-  isValid: boolean;
-  error?: string;
-}
-
-const mockImportData: ImportRecord[] = [
-  { title: 'Modern Web Development', author: 'Jane Smith', isbn: '978-1234567890', publicationYear: 2024, subjectCode: 'IT101', isValid: true },
-  { title: 'Advanced Algorithms', author: 'John Doe', isbn: '978-2345678901', publicationYear: 2023, subjectCode: 'IT102', isValid: true },
-  { title: 'Database Design', author: 'Maria Garcia', isbn: '978-3456789012', publicationYear: 2024, subjectCode: 'IT103', isValid: true },
-  { title: '', author: 'Missing Title', isbn: '978-4567890123', publicationYear: 2024, subjectCode: 'IT104', isValid: false, error: 'Title is required' },
-  { title: 'Cloud Computing', author: 'David Lee', isbn: 'invalid-isbn', publicationYear: 2023, subjectCode: 'IT105', isValid: false, error: 'Invalid ISBN format' },
-  { title: 'Machine Learning Basics', author: 'Sarah Johnson', isbn: '978-5678901234', publicationYear: 2025, subjectCode: 'IT201', isValid: true },
-  { title: 'Cybersecurity Essentials', author: 'Mike Brown', isbn: '978-6789012345', publicationYear: 2024, subjectCode: 'IT202', isValid: true },
-];
+const PYTHON_API = "http://127.0.0.1:8000";
 
 export default function ImportExportPage() {
-  const { books, courses, importBooks, getCourseStatusFn } = useData();
-  const [isDragging, setIsDragging] = useState(false);
-  const [showImportPreview, setShowImportPreview] = useState(false);
-  const [importData, setImportData] = useState<ImportRecord[]>([]);
   const [isImporting, setIsImporting] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [showExportPreview, setShowExportPreview] = useState(false);
-  const [exportType, setExportType] = useState<'books' | 'courses' | 'compliance'>('books');
+  const [exportType, setExportType] = useState<'books' | 'compliance'>('books');
+  const [selectedDept, setSelectedDept] = useState<string>("CS");
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
+  // --- HELPER: Trigger Browser Download ---
+  const triggerSingleDownload = async (endpoint: string, filename: string) => {
+    const response = await fetch(`${PYTHON_API}${endpoint}`);
+    if (!response.ok) throw new Error(`Failed to generate ${filename}`);
+    
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
   };
 
-  const handleDragLeave = () => {
-    setIsDragging(false);
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    // Simulate file processing
-    setImportData(mockImportData);
-    setShowImportPreview(true);
-  };
-
-  const handleFileSelect = () => {
-    // Simulate file selection
-    setImportData(mockImportData);
-    setShowImportPreview(true);
-  };
-
-  const handleConfirmImport = async () => {
+  // --- CORE: Handle Imports ---
+  const handleActualImport = async (file: File, endpoint: string) => {
     setIsImporting(true);
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    const validRecords = importData.filter(r => r.isValid);
-    importBooks(validRecords);
-    
-    setIsImporting(false);
-    setShowImportPreview(false);
-    toast.success(`Successfully imported ${validRecords.length} books`);
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await fetch(`${PYTHON_API}${endpoint}`, {
+        method: 'POST',
+        body: formData,
+      });
+      const result = await response.json();
+      
+      if (response.ok) toast.success(result.message);
+      else throw new Error(result.message);
+    } catch (error: any) {
+      toast.error(`Import Failed: ${error.message}`);
+    } finally {
+      setIsImporting(false);
+    }
   };
 
-  const handleExport = (type: 'books' | 'courses' | 'compliance') => {
-    setExportType(type);
-    setShowExportPreview(true);
+  // --- CORE: Handle Exports (Standard vs Advanced) ---
+  const handleDownload = async () => {
+    setIsExporting(true);
+    try {
+      if (exportType === 'compliance') {
+        // Red/Yellow Summary Table
+        await triggerSingleDownload("/export/summary", "Full_Library_Summary_2026.xlsx");
+        toast.success("Curriculum Summary downloaded!");
+      } else {
+        // Detailed Holdings (Gray/Blue)
+        if (showAdvanced) {
+          // Advanced Mode: Just the one they picked
+          await triggerSingleDownload(`/export/detailed?dept=${selectedDept}`, `Detailed_Holdings_${selectedDept}.xlsx`);
+          toast.success(`Detailed report for ${selectedDept} downloaded!`);
+        } else {
+          // Standard Mode: Download ALL 3 at once (Lead's requirement)
+          toast.info("Generating reports for CS, IT, and IS...");
+          const depts = ["CS", "IT", "IS"];
+          await Promise.all(depts.map(dept => 
+            triggerSingleDownload(`/export/detailed?dept=${dept}`, `Detailed_Holdings_${dept}.xlsx`)
+          ));
+          toast.success("All 3 Department Holdings downloaded!");
+        }
+      }
+      setShowExportPreview(false);
+    } catch (error: any) {
+      toast.error(`Export Failed: Ensure the Python server is running.`);
+    } finally {
+      setIsExporting(false);
+    }
   };
-
-  const handleDownload = () => {
-    toast.success(`${exportType === 'books' ? 'Book Master' : exportType === 'courses' ? 'Course Coding' : 'Compliance Report'} exported successfully`);
-    setShowExportPreview(false);
-  };
-
-  const validCount = importData.filter(r => r.isValid).length;
-  const invalidCount = importData.filter(r => !r.isValid).length;
 
   return (
-    <MainLayout title="Import/Export" subtitle="Manage data import and export operations">
+    <MainLayout title="Data Operations" subtitle="Manage curriculum templates and export professional library reports">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Import Section */}
-        <div className="bg-card rounded-xl shadow-card animate-slide-up">
-          <div className="p-6 border-b border-border">
-            <div className="flex items-center gap-2">
+        
+        {/* IMPORT SECTION */}
+        <div className="space-y-6">
+          <div className="bg-card rounded-xl shadow-card p-6 border border-border">
+            <div className="flex items-center gap-2 mb-4">
               <Upload className="w-5 h-5 text-primary" />
-              <h3 className="font-semibold text-lg">Import Data</h3>
+              <h3 className="font-semibold text-lg">Course Templates</h3>
             </div>
-            <p className="text-sm text-muted-foreground mt-1">
-              Upload Excel files to import books into the system
-            </p>
+            <p className="text-sm text-muted-foreground mb-4 italic">Update curriculum codes via the authoritative Excel file.</p>
+            <input 
+              type="file" 
+              accept=".xlsx,.xls" 
+              onChange={(e) => e.target.files?.[0] && handleActualImport(e.target.files[0], '/import/templates')}
+              disabled={isImporting || isExporting}
+              className="block w-full text-sm text-muted-foreground file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-white hover:file:bg-primary/90"
+            />
           </div>
-          <div className="p-6">
-            <div
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              onClick={handleFileSelect}
-              className={cn(
-                "border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-all",
-                isDragging 
-                  ? "border-primary bg-primary/5" 
-                  : "border-border hover:border-primary/50 hover:bg-muted/50"
-              )}
-            >
-              <FileSpreadsheet className={cn(
-                "w-16 h-16 mx-auto mb-4",
-                isDragging ? "text-primary" : "text-muted-foreground"
-              )} />
-              <p className="font-medium text-foreground mb-1">
-                Drag and drop your Excel file here
-              </p>
-              <p className="text-sm text-muted-foreground mb-4">
-                or click to browse
-              </p>
-              <Badge variant="secondary">.xlsx, .xls files supported</Badge>
+
+          <div className="bg-card rounded-xl shadow-card p-6 border border-border">
+            <div className="flex items-center gap-2 mb-4">
+              <Database className="w-5 h-5 text-success" />
+              <h3 className="font-semibold text-lg">Library Acquisitions</h3>
             </div>
+            <p className="text-sm text-muted-foreground mb-4 italic">Import new books into the masterlist via CSV.</p>
+            <input 
+              type="file" 
+              accept=".csv" 
+              onChange={(e) => e.target.files?.[0] && handleActualImport(e.target.files[0], '/import/acquisitions')}
+              disabled={isImporting || isExporting}
+              className="block w-full text-sm text-muted-foreground file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-success file:text-white hover:file:bg-success/90"
+            />
           </div>
         </div>
 
-        {/* Export Section */}
-        <div className="bg-card rounded-xl shadow-card animate-slide-up" style={{ animationDelay: '100ms' }}>
-          <div className="p-6 border-b border-border">
-            <div className="flex items-center gap-2">
-              <Download className="w-5 h-5 text-success" />
-              <h3 className="font-semibold text-lg">Export Data</h3>
-            </div>
-            <p className="text-sm text-muted-foreground mt-1">
-              Download data in various formats
-            </p>
+        {/* EXPORT SECTION */}
+        <div className="bg-card rounded-xl shadow-card p-6 border border-border">
+          <div className="flex items-center gap-2 mb-4">
+            <Download className="w-5 h-5 text-indigo-500" />
+            <h3 className="font-semibold text-lg">Export Center</h3>
           </div>
-          <div className="p-6 space-y-4">
-            <div
-              onClick={() => handleExport('books')}
-              className="p-4 border border-border rounded-lg hover:border-primary/50 hover:bg-muted/50 cursor-pointer transition-all group"
+          <div className="space-y-4">
+            <Button 
+              variant="outline" 
+              className="w-full justify-between h-16" 
+              onClick={() => { setExportType('books'); setShowExportPreview(true); }}
             >
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
-                  <FileSpreadsheet className="w-6 h-6 text-primary" />
-                </div>
-                <div className="flex-1">
-                  <p className="font-medium text-foreground">Export Book Master</p>
-                  <p className="text-sm text-muted-foreground">Download all books as Excel</p>
-                </div>
-                <FileDown className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+              <div className="text-left">
+                <p className="font-medium text-blue-600">Detailed Holdings Report</p>
+                <p className="text-xs text-muted-foreground">Gray/Blue Course-Book lists (exp.py)</p>
               </div>
-            </div>
+              <FileDown className="w-5 h-5" />
+            </Button>
 
-            <div
-              onClick={() => handleExport('courses')}
-              className="p-4 border border-border rounded-lg hover:border-primary/50 hover:bg-muted/50 cursor-pointer transition-all group"
+            <Button 
+              variant="outline" 
+              className="w-full justify-between h-16" 
+              onClick={() => { setExportType('compliance'); setShowExportPreview(true); }}
             >
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-lg bg-success/10 flex items-center justify-center group-hover:bg-success/20 transition-colors">
-                  <FileSpreadsheet className="w-6 h-6 text-success" />
-                </div>
-                <div className="flex-1">
-                  <p className="font-medium text-foreground">Export Course Coding Template</p>
-                  <p className="text-sm text-muted-foreground">Download course assignments as Excel</p>
-                </div>
-                <FileDown className="w-5 h-5 text-muted-foreground group-hover:text-success transition-colors" />
+              <div className="text-left">
+                <p className="font-medium text-red-600">Curriculum Summary 2026</p>
+                <p className="text-xs text-muted-foreground">Red/Yellow Compliance (testexport.py)</p>
               </div>
-            </div>
-
-            <div
-              onClick={() => handleExport('compliance')}
-              className="p-4 border border-border rounded-lg hover:border-primary/50 hover:bg-muted/50 cursor-pointer transition-all group"
-            >
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-lg bg-danger/10 flex items-center justify-center group-hover:bg-danger/20 transition-colors">
-                  <FileText className="w-6 h-6 text-danger" />
-                </div>
-                <div className="flex-1">
-                  <p className="font-medium text-foreground">Export Compliance Report</p>
-                  <p className="text-sm text-muted-foreground">Generate PDF compliance report</p>
-                </div>
-                <FileDown className="w-5 h-5 text-muted-foreground group-hover:text-danger transition-colors" />
-              </div>
-            </div>
+              <FileSpreadsheet className="w-5 h-5" />
+            </Button>
           </div>
         </div>
       </div>
 
-      {/* Import Preview Dialog */}
-      <Dialog open={showImportPreview} onOpenChange={setShowImportPreview}>
-        <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
-          <DialogHeader>
-            <DialogTitle>Import Preview</DialogTitle>
-          </DialogHeader>
-          
-          <div className="flex items-center gap-4 py-4">
-            <Badge className="bg-success/10 text-success border-success/20">
-              <CheckCircle className="w-3 h-3 mr-1" />
-              {validCount} valid
-            </Badge>
-            <Badge className="bg-danger/10 text-danger border-danger/20">
-              <XCircle className="w-3 h-3 mr-1" />
-              {invalidCount} invalid
-            </Badge>
-          </div>
-
-          <div className="flex-1 overflow-auto border rounded-lg">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/50">
-                  <TableHead className="w-12">Status</TableHead>
-                  <TableHead>Title</TableHead>
-                  <TableHead>Author</TableHead>
-                  <TableHead>ISBN</TableHead>
-                  <TableHead>Year</TableHead>
-                  <TableHead>Subject</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {importData.map((record, index) => (
-                  <TableRow key={index} className={cn(!record.isValid && "bg-danger/5")}>
-                    <TableCell>
-                      {record.isValid ? (
-                        <CheckCircle className="w-5 h-5 text-success" />
-                      ) : (
-                        <XCircle className="w-5 h-5 text-danger" />
-                      )}
-                    </TableCell>
-                    <TableCell className="font-medium">
-                      {record.title || <span className="text-danger italic">Missing</span>}
-                    </TableCell>
-                    <TableCell>{record.author}</TableCell>
-                    <TableCell className="font-mono text-sm">
-                      {record.isValid ? record.isbn : (
-                        <span className="text-danger">{record.isbn}</span>
-                      )}
-                    </TableCell>
-                    <TableCell>{record.publicationYear}</TableCell>
-                    <TableCell>{record.subjectCode}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-
-          <div className="flex justify-end gap-3 pt-4 border-t">
-            <Button variant="outline" onClick={() => setShowImportPreview(false)}>
-              Cancel
-            </Button>
-            <Button 
-              onClick={handleConfirmImport}
-              disabled={isImporting || validCount === 0}
-              className="gradient-primary text-white"
-            >
-              {isImporting ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Importing...
-                </>
-              ) : (
-                <>
-                  <Upload className="w-4 h-4 mr-2" />
-                  Import {validCount} Records
-                </>
-              )}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Export Preview Dialog */}
+      {/* EXPORT DIALOG */}
       <Dialog open={showExportPreview} onOpenChange={setShowExportPreview}>
-        <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>
-              {exportType === 'books' && 'Book Master Export Preview'}
-              {exportType === 'courses' && 'Course Coding Export Preview'}
-              {exportType === 'compliance' && 'Compliance Report Preview'}
-            </DialogTitle>
+            <DialogTitle>Export Configuration</DialogTitle>
           </DialogHeader>
           
-          <div className="flex-1 overflow-auto border rounded-lg">
+          <div className="space-y-4 py-4">
+            <p className="text-sm text-muted-foreground">
+              {exportType === 'books' 
+                ? "Standard: Generates separate holdings files for CS, IT, and IS simultaneously." 
+                : "Standard: Generates a single 5-year recency summary for all curriculums."}
+            </p>
+
             {exportType === 'books' && (
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/50">
-                    <TableHead>Title</TableHead>
-                    <TableHead>Author</TableHead>
-                    <TableHead>ISBN</TableHead>
-                    <TableHead>Year</TableHead>
-                    <TableHead>Subject</TableHead>
-                    <TableHead>Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {books.slice(0, 10).map((book) => (
-                    <TableRow key={book.id}>
-                      <TableCell className="font-medium">{book.title}</TableCell>
-                      <TableCell>{book.author}</TableCell>
-                      <TableCell className="font-mono text-sm">{book.isbn}</TableCell>
-                      <TableCell>{book.publicationYear}</TableCell>
-                      <TableCell>{book.subjectCode}</TableCell>
-                      <TableCell>{book.status}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-            
-            {exportType === 'courses' && (
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/50">
-                    <TableHead>Code</TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Program</TableHead>
-                    <TableHead>Department</TableHead>
-                    <TableHead>Books</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {courses.map((course) => (
-                    <TableRow key={course.id}>
-                      <TableCell className="font-medium">{course.code}</TableCell>
-                      <TableCell>{course.name}</TableCell>
-                      <TableCell>{course.program}</TableCell>
-                      <TableCell>{course.department}</TableCell>
-                      <TableCell>{course.assignedBookIds.length}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
+              <div className="pt-2 border-t">
+                <button 
+                  onClick={() => setShowAdvanced(!showAdvanced)}
+                  className="text-xs font-semibold text-primary flex items-center gap-1 hover:underline mb-3"
+                >
+                  {showAdvanced ? <ChevronUp className="w-3 h-3"/> : <ChevronDown className="w-3 h-3"/>}
+                  {showAdvanced ? "Hide Advanced Options" : "Show Advanced Options"}
+                </button>
 
-            {exportType === 'compliance' && (
-              <div className="p-6 space-y-6">
-                <div className="text-center border-b pb-6">
-                  <h2 className="text-2xl font-bold">MCCLRS Compliance Report</h2>
-                  <p className="text-muted-foreground">Generated on {new Date().toLocaleDateString()}</p>
-                </div>
-                
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="p-4 bg-success/10 rounded-lg text-center">
-                    <p className="text-3xl font-bold text-success">{courses.filter(c => getCourseStatusFn(c) === 'complete').length}</p>
-                    <p className="text-sm text-success">Compliant</p>
+                {showAdvanced && (
+                  <div className="space-y-2 animate-in fade-in slide-in-from-top-1">
+                    <label className="text-sm font-medium">Download specific department only:</label>
+                    <select 
+                      value={selectedDept} 
+                      onChange={(e) => setSelectedDept(e.target.value)}
+                      className="w-full p-2 rounded-md border border-input bg-background text-sm"
+                    >
+                      <option value="CS">Computer Science (CS)</option>
+                      <option value="IT">Information Technology (IT)</option>
+                      <option value="IS">Information Systems (IS)</option>
+                    </select>
                   </div>
-                  <div className="p-4 bg-warning/10 rounded-lg text-center">
-                    <p className="text-3xl font-bold text-warning">{courses.filter(c => getCourseStatusFn(c) === 'incomplete').length}</p>
-                    <p className="text-sm text-warning">Incomplete</p>
-                  </div>
-                  <div className="p-4 bg-danger/10 rounded-lg text-center">
-                    <p className="text-3xl font-bold text-danger">{courses.filter(c => getCourseStatusFn(c) === 'outdated').length}</p>
-                    <p className="text-sm text-danger">Outdated</p>
-                  </div>
-                </div>
-
-                <p className="text-sm text-muted-foreground text-center">
-                  ... preview truncated. Download for full report.
-                </p>
+                )}
               </div>
             )}
           </div>
 
           <div className="flex justify-end gap-3 pt-4 border-t">
-            <Button variant="outline" onClick={() => setShowExportPreview(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleDownload} className="gradient-primary text-white">
-              <Download className="w-4 h-4 mr-2" />
-              Download {exportType === 'compliance' ? 'PDF' : 'Excel'}
+            <Button variant="outline" onClick={() => setShowExportPreview(false)}>Cancel</Button>
+            <Button 
+              onClick={() => handleDownload()} 
+              className="gradient-primary text-white"
+              disabled={isExporting}
+            >
+              {isExporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+              Generate Reports
             </Button>
           </div>
         </DialogContent>
