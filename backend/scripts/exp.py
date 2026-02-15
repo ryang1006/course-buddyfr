@@ -4,8 +4,8 @@ import re
 from supabase import create_client
 
 # CONFIG
-SUPABASE_URL = "https://yalejerenkwsginegaax.supabase.co"
-SUPABASE_KEY = "sb_secret_VQWVY5qONGmTQtE_6zeTOQ_buga429v"
+#SUPABASE_URL = 
+#SUPABASE_KEY = 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def get_year_level(code):
