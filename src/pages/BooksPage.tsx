@@ -1,12 +1,7 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { useData } from '@/contexts/DataContext';
-import { useAuth } from '@/contexts/AuthContext';
-import { BookModal } from '@/components/books/BookModal';
-import { ConfirmDialog } from '@/components/common/ConfirmDialog';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
+import { supabase } from '@/lib/supabaseClient';
+import { toast } from 'sonner';
 import {
   Table,
   TableBody,
@@ -15,278 +10,330 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Book, isBookRecent } from '@/lib/mockData';
-import { Plus, Search, Edit, Trash2, ChevronUp, ChevronDown } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { toast } from 'sonner';
 
-type SortField = 'title' | 'author' | 'publicationYear' | 'subjectCode';
-type SortOrder = 'asc' | 'desc';
+/*helpers */
+const EmptyText = () => (
+  <span className="text-gray-400 italic select-none">empty</span>
+);
+
+const TruncatedCell = ({
+  value,
+  maxWidth = 'max-w-[8rem]',
+}: {
+  value?: string;
+  maxWidth?: string;
+}) => {
+  if (!value) return <EmptyText />;
+
+  return (
+    <span
+      title={value}
+      className={`block truncate ${maxWidth} cursor-help`}
+    >
+      {value}
+    </span>
+  );
+};
 
 export default function BooksPage() {
-  const { books, deleteBook } = useData();
-  const { user } = useAuth();
-  
+  const [books, setBooks] = useState<any[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'recent' | 'outdated'>('all');
-  const [sortField, setSortField] = useState<SortField>('title');
-  const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
-  
-  const [modalOpen, setModalOpen] = useState(false);
-  const [selectedBook, setSelectedBook] = useState<Book | null>(null);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [bookToDelete, setBookToDelete] = useState<Book | null>(null);
+  const [sortColumn, setSortColumn] = useState('created_at');
+  const [sortAsc, setSortAsc] = useState(false);
 
-  const currentYear = new Date().getFullYear();
+  const [mode, setMode] = useState<'view' | 'add' | 'edit' | null>(null);
+  const [form, setForm] = useState<any>({});
 
-  const filteredBooks = useMemo(() => {
-    let result = [...books];
+  /*fetch*/
+  const fetchBooks = async () => {
+    let query = supabase
+      .from('books')
+      .select('*')
+      .order(sortColumn, { ascending: sortAsc });
 
-    // Search filter
     if (search) {
-      const searchLower = search.toLowerCase();
-      result = result.filter(
-        b =>
-          b.title.toLowerCase().includes(searchLower) ||
-          b.author.toLowerCase().includes(searchLower) ||
-          b.isbn.toLowerCase().includes(searchLower) ||
-          b.subjectCode.toLowerCase().includes(searchLower)
+      query = query.or(
+        `title.ilike.%${search}%,author.ilike.%${search}%,isbn.ilike.%${search}%`
       );
     }
 
-    // Status filter
-    if (statusFilter !== 'all') {
-      result = result.filter(b => {
-        const isRecent = isBookRecent(b.publicationYear);
-        return statusFilter === 'recent' ? isRecent : !isRecent;
-      });
+    const { data, error } = await query;
+
+    if (error) {
+      toast.error('Failed to load books');
+      return;
     }
 
-    // Sort
-    result.sort((a, b) => {
-      let comparison = 0;
-      if (sortField === 'title') {
-        comparison = a.title.localeCompare(b.title);
-      } else if (sortField === 'author') {
-        comparison = a.author.localeCompare(b.author);
-      } else if (sortField === 'publicationYear') {
-        comparison = a.publicationYear - b.publicationYear;
-      } else if (sortField === 'subjectCode') {
-        comparison = a.subjectCode.localeCompare(b.subjectCode);
-      }
-      return sortOrder === 'asc' ? comparison : -comparison;
-    });
-
-    return result;
-  }, [books, search, statusFilter, sortField, sortOrder]);
-
-  const handleSort = (field: SortField) => {
-    if (sortField === field) {
-      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortField(field);
-      setSortOrder('asc');
-    }
+    setBooks(data || []);
   };
 
-  const handleEdit = (book: Book) => {
-    setSelectedBook(book);
-    setModalOpen(true);
-  };
+  useEffect(() => {
+    fetchBooks();
+  }, [search, sortColumn, sortAsc]);
 
-  const handleDelete = (book: Book) => {
-    setBookToDelete(book);
-    setDeleteDialogOpen(true);
-  };
-
-  const confirmDelete = () => {
-    if (bookToDelete && user) {
-      deleteBook(bookToDelete.id, user.name);
-      toast.success('Book moved to recycle bin');
-    }
-    setDeleteDialogOpen(false);
-    setBookToDelete(null);
-  };
-
-  const SortIcon = ({ field }: { field: SortField }) => {
-    if (sortField !== field) return null;
-    return sortOrder === 'asc' ? (
-      <ChevronUp className="w-4 h-4 inline ml-1" />
-    ) : (
-      <ChevronDown className="w-4 h-4 inline ml-1" />
+  /* Helpr*/
+  const toggleSelect = (id: string) => {
+    setSelected((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
   };
 
+  const handleSort = (col: string) => {
+    if (sortColumn === col) setSortAsc(!sortAsc);
+    else {
+      setSortColumn(col);
+      setSortAsc(true);
+    }
+  };
+
+  /* CRUD */
+  const openView = () => {
+    setForm(books.find((b) => b.id === selected[0]));
+    setMode('view');
+  };
+
+  const openEdit = () => {
+    setForm(books.find((b) => b.id === selected[0]));
+    setMode('edit');
+  };
+
+  const openAdd = () => {
+    setForm({});
+    setMode('add');
+  };
+
+  const saveBook = async () => {
+    const action =
+      mode === 'add'
+        ? supabase.from('books').insert([form])
+        : supabase.from('books').update(form).eq('id', form.id);
+
+    const { error } = await action;
+
+    if (error) {
+      toast.error('Save failed');
+      return;
+    }
+
+    toast.success('Saved successfully');
+    setMode(null);
+    fetchBooks();
+  };
+
+const deleteBooks = async () => {
+  try {
+    for (let id of selected) {
+      const book = books.find((b) => b.id === id);
+      if (!book) continue;
+
+const { error: insertError } = await supabase
+  .from('recycle_bin')
+  .insert([
+    {
+      original_id: book.id, 
+      title: book.title,
+      author: book.author,
+      publisher: book.publisher,
+      year: book.year,
+      isbn: book.isbn,
+      call_number: book.call_number,
+      accession_number: book.accession_number,
+      source_type: book.source_type,
+      created_at: book.created_at,
+      deleted_at: new Date().toISOString(),
+    },
+  ]);
+
+
+      if (insertError) {
+        console.error(insertError);
+        toast.error(insertError.message);
+        return;
+      }
+
+      const { error: deleteError } = await supabase
+        .from('books')
+        .delete()
+        .eq('id', id);
+
+      if (deleteError) {
+        toast.error(deleteError.message);
+        return;
+      }
+    }
+
+    toast.success('Deleted successfully');
+    setSelected([]);
+    fetchBooks();
+  } catch (err) {
+    toast.error('Unexpected error');
+  }
+};
+
+
+
+  /* UI */
   return (
     <MainLayout title="Book Master" subtitle="Manage your book collection">
-      {/* Toolbar */}
-      <div className="bg-card rounded-xl p-4 shadow-card mb-6 animate-slide-up">
-        <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
-          <div className="flex flex-col sm:flex-row gap-4 flex-1">
-            <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                placeholder="Search books..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-            <Select value={statusFilter} onValueChange={(v: 'all' | 'recent' | 'outdated') => setStatusFilter(v)}>
-              <SelectTrigger className="w-40">
-                <SelectValue placeholder="Filter by status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Books</SelectItem>
-                <SelectItem value="recent">Recent (≤5 yrs)</SelectItem>
-                <SelectItem value="outdated">Outdated (&gt;5 yrs)</SelectItem>
-              </SelectContent>
-            </Select>
+      <div className="relative h-[calc(100vh-180px)] overflow-y-auto">
+        <div
+          className="sticky top-4 z-30
+            bg-white/95 backdrop-blur
+            border rounded-xl shadow-lg
+            px-4 py-3 mb-3
+            flex flex-wrap gap-3 items-center"
+        >
+          <input
+            placeholder="Search title, author, ISBN"
+            className="border rounded px-3 py-1 text-sm w-64"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+
+          <div className="ml-auto flex gap-2">
+            <button
+              onClick={openView}
+              disabled={selected.length !== 1}
+              className="px-3 py-1 rounded text-sm
+                bg-blue-500 text-white hover:bg-blue-600
+                disabled:opacity-50"
+            >
+              View
+            </button>
+
+            <button
+              onClick={openAdd}
+              className="px-3 py-1 rounded text-sm
+                bg-green-500 text-white hover:bg-green-600"
+            >
+              Add
+            </button>
+
+            <button
+              onClick={openEdit}
+              disabled={selected.length !== 1}
+              className="px-3 py-1 rounded text-sm
+                bg-yellow-400 text-black hover:bg-yellow-500
+                disabled:opacity-50"
+            >
+              Edit
+            </button>
+
+            <button
+              onClick={deleteBooks}
+              disabled={!selected.length}
+              className="px-3 py-1 rounded text-sm
+                bg-red-500 text-white hover:bg-red-600
+                disabled:opacity-50"
+            >
+              Delete
+            </button>
           </div>
-          <Button 
-            onClick={() => { setSelectedBook(null); setModalOpen(true); }}
-            className="gradient-primary text-white"
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Add Book
-          </Button>
+        </div>
+
+        <div className="bg-card rounded-xl shadow-card overflow-x-auto pt-[30px]">
+          <Table className="table-fixed text-sm w-full">
+  <TableHeader className="bg-purple-100">
+    <TableRow>
+      <TableHead className="w-8" />
+      {['title', 'author', 'publisher', 'year'].map((c) => (
+        <TableHead
+          key={c}
+          className="cursor-pointer text-purple-800"
+          onClick={() => handleSort(c)}
+        >
+          {c.toUpperCase()}
+        </TableHead>
+      ))}
+      <TableHead>ISBN</TableHead>
+      <TableHead>Call No.</TableHead>
+      <TableHead>Acc. No.</TableHead>
+      <TableHead>Source</TableHead>
+      <TableHead>Created</TableHead>
+    </TableRow>
+  </TableHeader>
+
+  <TableBody>
+    {books.map((b) => (
+      <TableRow key={b.id} className="hover:bg-muted/50">
+        <TableCell>
+          <input
+            type="checkbox"
+            checked={selected.includes(b.id)}
+            onChange={() => toggleSelect(b.id)}
+          />
+        </TableCell>
+        <TableCell><TruncatedCell value={b.title} /></TableCell>
+        <TableCell><TruncatedCell value={b.author} /></TableCell>
+        <TableCell><TruncatedCell value={b.publisher} /></TableCell>
+        <TableCell>{b.year ?? <EmptyText />}</TableCell>
+        <TableCell><TruncatedCell value={b.isbn} maxWidth="max-w-[7rem]" /></TableCell>
+        <TableCell><TruncatedCell value={b.call_number} maxWidth="max-w-[6rem]" /></TableCell>
+        <TableCell><TruncatedCell value={b.accession_number} maxWidth="max-w-[6rem]" /></TableCell>
+        <TableCell><TruncatedCell value={b.source_type} maxWidth="max-w-[6rem]" /></TableCell>
+        <TableCell>{b.created_at ? new Date(b.created_at).toLocaleDateString() : <EmptyText />}</TableCell>
+      </TableRow>
+    ))}
+  </TableBody>
+</Table>
+
         </div>
       </div>
 
-      {/* Table */}
-      <div className="bg-card rounded-xl shadow-card overflow-hidden animate-slide-up" style={{ animationDelay: '100ms' }}>
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-muted/50">
-              <TableHead 
-                className="cursor-pointer hover:text-foreground"
-                onClick={() => handleSort('title')}
-              >
-                Title <SortIcon field="title" />
-              </TableHead>
-              <TableHead 
-                className="cursor-pointer hover:text-foreground"
-                onClick={() => handleSort('author')}
-              >
-                Author <SortIcon field="author" />
-              </TableHead>
-              <TableHead>ISBN</TableHead>
-              <TableHead 
-                className="cursor-pointer hover:text-foreground"
-                onClick={() => handleSort('publicationYear')}
-              >
-                Year <SortIcon field="publicationYear" />
-              </TableHead>
-              <TableHead 
-                className="cursor-pointer hover:text-foreground"
-                onClick={() => handleSort('subjectCode')}
-              >
-                Subject <SortIcon field="subjectCode" />
-              </TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredBooks.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
-                  No books found
-                </TableCell>
-              </TableRow>
-            ) : (
-              filteredBooks.map((book) => {
-                const isRecent = isBookRecent(book.publicationYear);
-                return (
-                  <TableRow key={book.id} className="hover:bg-muted/50">
-                    <TableCell className="font-medium max-w-xs truncate">
-                      {book.title}
-                    </TableCell>
-                    <TableCell>{book.author}</TableCell>
-                    <TableCell className="font-mono text-sm">{book.isbn}</TableCell>
-                    <TableCell>
-                      <Badge 
-                        variant="outline"
-                        className={cn(
-                          isRecent 
-                            ? 'bg-success/10 text-success border-success/20' 
-                            : "bg-danger/10 text-danger border-danger/20"
-                        )}
-                      >
-                        {book.publicationYear}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">{book.subjectCode}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge 
-                        variant="outline"
-                        className={cn(
-                          book.status === 'assigned'
-                            ? 'bg-primary/10 text-primary border-primary/20'
-                            : 'bg-muted text-muted-foreground'
-                        )}
-                      >
-                        {book.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <Button 
-                          variant="ghost" 
-                          size="icon"
-                          onClick={() => handleEdit(book)}
-                        >
-                          <Edit className="w-4 h-4" />
-                        </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="icon"
-                          className="text-danger hover:text-danger"
-                          onClick={() => handleDelete(book)}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })
-            )}
-          </TableBody>
-        </Table>
-        
-        {filteredBooks.length > 0 && (
-          <div className="p-4 border-t border-border text-sm text-muted-foreground">
-            Showing {filteredBooks.length} of {books.length} books
-          </div>
+    {/* MODAL */}
+{mode && (
+  <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center">
+    <div className="bg-white rounded-xl p-6 w-[500px] space-y-3">
+      <h2 className="text-lg font-semibold capitalize">{mode} Book</h2>
+
+      {[
+        'title',
+        'author',
+        'publisher',
+        'isbn',
+        'call_number',
+        'source_type',
+        'year',
+        'accession_number',
+      ].map((f) => (
+        <input
+          key={f}
+          type={f === 'year' ? 'number' : 'text'} // number input for year
+          disabled={mode === 'view'}
+          placeholder={f.replace('_', ' ')}
+          className="border rounded px-3 py-1 w-full"
+          value={form[f] ?? ''}
+          onChange={(e) =>
+            setForm({
+              ...form,
+              [f]:
+                f === 'year' ? parseInt(e.target.value) || '' : e.target.value,
+            })
+          }
+        />
+      ))}
+
+      <div className="flex justify-end gap-2 pt-2">
+        <button
+          onClick={() => setMode(null)}
+          className="px-3 py-1 rounded border"
+        >
+          Close
+        </button>
+
+        {mode !== 'view' && (
+          <button
+            onClick={saveBook}
+            className="px-3 py-1 rounded bg-purple-600 text-white"
+          >
+            Save
+          </button>
         )}
       </div>
-
-      {/* Modals */}
-      <BookModal 
-        open={modalOpen} 
-        onOpenChange={setModalOpen} 
-        book={selectedBook}
-      />
-      
-      <ConfirmDialog
-        open={deleteDialogOpen}
-        onOpenChange={setDeleteDialogOpen}
-        title="Delete Book"
-        description={`Are you sure you want to delete "${bookToDelete?.title}"? This will move it to the recycle bin.`}
-        confirmLabel="Delete"
-        variant="destructive"
-        onConfirm={confirmDelete}
-      />
+    </div>
+  </div>
+)}
     </MainLayout>
   );
 }
