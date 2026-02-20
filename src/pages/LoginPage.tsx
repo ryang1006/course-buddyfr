@@ -16,7 +16,6 @@ export default function LoginPage() {
   
   const navigate = useNavigate();
   const { login } = useAuth();
-  
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
