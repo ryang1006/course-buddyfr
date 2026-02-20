@@ -5,112 +5,149 @@ import { ComplianceChart } from '@/components/dashboard/ComplianceChart';
 import { DepartmentChart } from '@/components/dashboard/DepartmentChart';
 import { CourseStatusTable } from '@/components/dashboard/CourseStatusTable';
 import { useData } from '@/contexts/DataContext';
-import { BookOpen, CheckCircle, AlertTriangle, XCircle } from 'lucide-react';
+import { BookOpen, CheckCircle, AlertTriangle, Library, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export default function DashboardPage() {
-  const { courses, getStats, getDepartmentStats, getCourseStatusFn } = useData();
+  // Destructured 'books' to fix the "Cannot find name 'books'" error
+  const { courses, books, loading, getStats, getDepartmentStats } = useData();
+  const [searchQuery, setSearchQuery] = useState('');
+  const [deptFilter, setDeptFilter] = useState('all');
 
-  // Filters
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'complete' | 'incomplete' | 'outdated'>('all');
-  const [departmentFilter, setDepartmentFilter] = useState<string>('all');
+  const statsData = getStats();
+  const deptStats = getDepartmentStats();
 
-  // Departments
-  const departments = useMemo(() => {
-    const depts = new Set(courses.map(c => c.department));
-    return Array.from(depts);
+  const uniqueDepts = useMemo(() => {
+    const depts = new Set<string>();
+    courses.forEach(c => {
+      if (Array.isArray(c.department)) {
+        c.department.forEach(d => depts.add(d));
+      }
+    });
+    return Array.from(depts).sort();
   }, [courses]);
 
-  // Filtered courses (logic from CoursesPage)
   const filteredCourses = useMemo(() => {
-    let result = [...courses];
+    return courses.filter(course => {
+      const matchesSearch = 
+        course.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        course.name.toLowerCase().includes(searchQuery.toLowerCase());
+      
+      const matchesDept = deptFilter === 'all' || course.department.includes(deptFilter);
+      
+      return matchesSearch && matchesDept;
+    });
+  }, [courses, searchQuery, deptFilter]);
 
-    if (search) {
-      const searchLower = search.toLowerCase();
-      result = result.filter(
-        c =>
-          c.code.toLowerCase().includes(searchLower) ||
-          c.name.toLowerCase().includes(searchLower) ||
-          c.program.toLowerCase().includes(searchLower)
-      );
-    }
+  // Fixed: Replaced invalid variants with allowed values ('primary', 'success', 'warning')
+  const statCards = [
+    { 
+      title: 'Total Courses', 
+      value: statsData.total, 
+      icon: BookOpen, 
+      variant: 'primary' as const,
+      description: 'Total curriculum entries'
+    },
+    { 
+      title: 'Compliant', 
+      value: statsData.complete, 
+      icon: CheckCircle, 
+      variant: 'success' as const,
+      description: 'With assigned resources'
+    },
+    { 
+      title: 'Pending Resources', 
+      value: statsData.incomplete, 
+      icon: AlertTriangle, 
+      variant: 'warning' as const,
+      description: 'Missing book links'
+    },
+    { 
+      title: 'Library Assets', 
+      value: books.length, 
+      icon: Library, 
+      variant: 'primary' as const,
+      description: 'Total unique titles'
+    },
+  ];
 
-    if (statusFilter !== 'all') {
-      result = result.filter(c => getCourseStatusFn(c) === statusFilter);
-    }
+  // Fixed: Mapped 'total' to 'count' to satisfy DepartmentChart requirements
+  const chartDeptData = deptStats.map(d => ({
+    name: d.name,
+    count: d.total
+  }));
 
-    if (departmentFilter !== 'all') {
-      result = result.filter(c => c.department === departmentFilter);
-    }
-
-    return result;
-  }, [courses, search, statusFilter, departmentFilter, getCourseStatusFn]);
-
-  const stats = getStats();
-  const departmentStats = getDepartmentStats();
+  if (loading) {
+    return (
+      <MainLayout title="Dashboard" subtitle="Loading library analytics...">
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        </div>
+      </MainLayout>
+    );
+  }
 
   return (
-    <MainLayout title="Dashboard" subtitle="Overview of course coding compliance and book allocation">
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <StatCard title="Total Courses" value={stats.total} icon={BookOpen} variant='primary'/>
-        <StatCard title="Compliant" value={stats.complete} icon={CheckCircle} variant="success" />
-        <StatCard title="Incomplete" value={stats.incomplete} icon={AlertTriangle} variant="warning" />
-        <StatCard title="Outdated" value={stats.outdated} icon={XCircle} variant="danger" />
+    <MainLayout 
+      title="Library Dashboard" 
+      subtitle="Monitoring curriculum resource compliance and asset distribution"
+    >
+      {/* Stat Cards Section */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        {statCards.map((stat) => (
+          // Fixed: Changed key from stat.label to stat.title
+          <StatCard key={stat.title} {...stat} />
+        ))}
       </div>
 
-      {/* Filters (same as CoursesPage) */}
-      <div className="bg-card rounded-xl p-4 shadow-card mb-6 animate-slide-up flex flex-col md:flex-row gap-4 items-start md:items-center">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input
-            placeholder="Search courses..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-10"
-          />
+      {/* Charts Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+        <ComplianceChart 
+          complete={statsData.complete} 
+          incomplete={statsData.incomplete} 
+          outdated={0} // Fixed: Added missing required outdated prop
+        />
+        <DepartmentChart data={chartDeptData} />
+      </div>
+
+      {/* Course List Section */}
+      <div className="bg-card rounded-xl shadow-card border border-border overflow-hidden">
+        <div className="p-6 border-b border-border">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <h3 className="text-lg font-semibold">Course Compliance Status</h3>
+            
+            <div className="flex flex-col sm:flex-row gap-3">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search code or title..."
+                  className="pl-9 w-full sm:w-64"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
+
+              <Select value={deptFilter} onValueChange={setDeptFilter}>
+                <SelectTrigger className="w-full sm:w-48">
+                  <SelectValue placeholder="Department" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Departments</SelectItem>
+                  {uniqueDepts.map(dept => (
+                    <SelectItem key={dept} value={dept}>{dept}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
         </div>
 
-        <Select value={statusFilter} onValueChange={(v: any) => setStatusFilter(v)}>
-          <SelectTrigger className="w-40">
-            <SelectValue placeholder="Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Status</SelectItem>
-            <SelectItem value="complete">Compliant</SelectItem>
-            <SelectItem value="incomplete">Incomplete</SelectItem>
-            <SelectItem value="outdated">Outdated</SelectItem>
-          </SelectContent>
-        </Select>
-
-        <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="Department" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Departments</SelectItem>
-            {departments.map(dept => (
-              <SelectItem key={dept} value={dept}>{dept}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Course Status Table */}
-      <div className="bg-card rounded-xl shadow-card p-6">
-        <CourseStatusTable courses={filteredCourses} />
-      </div>
-
-      {filteredCourses.length === 0 && (
-        <div className="text-center py-12">
-          <p className="text-muted-foreground">No courses found</p>
+        <div className="p-0">
+          <CourseStatusTable courses={filteredCourses} />
         </div>
-      )}
+      </div>
     </MainLayout>
   );
 }

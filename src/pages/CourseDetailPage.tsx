@@ -21,18 +21,19 @@ const EmptyText = () => (
 /* ---------------- Component ---------------- */
 
 export default function CourseDetailPage() {
-  const { courseId } = useParams<{ courseId: string }>();
+  // Use 'id' to match the URL parameter: /courses/:id
+  const { id } = useParams<{ id: string }>(); 
   const [course, setCourse] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-
-
-    if (!courseId) return;
+    // If no ID is present, don't bother fetching
+    if (!id) return;
 
     const fetchCourse = async () => {
       try {
         setLoading(true);
+        console.log("Starting Supabase request for UUID:", id);
 
         const { data, error } = await supabase
           .from('courses')
@@ -42,24 +43,21 @@ export default function CourseDetailPage() {
             title,
             department,
             course_books (
-              books (
-                id,
-                title,
-                author,
-                publisher,
-                year,
-                call_number,
-                accession_number
-              )
+              book_id,
+              books (*)
             )
           `)
-          .eq('id', courseId)
+          .eq('id', id)
           .single();
 
         if (error) throw error;
-
-        setCourse(data);
+        
+        if (data) {
+          console.log("Raw Supabase Data:", data);
+          setCourse(data);
+        }
       } catch (err: any) {
+        console.error("Detailed Fetch Error:", err);
         toast.error(err.message || 'Failed to load course');
       } finally {
         setLoading(false);
@@ -67,18 +65,19 @@ export default function CourseDetailPage() {
     };
 
     fetchCourse();
-  }, [courseId]);
+  }, [id]); // Dependency should be 'id'
 
-  const books = (course?.course_books || [])
+  // Derived state: Extract the books from the nested course_books relationship
+  const books = course?.course_books
     ? course.course_books
         .map((cb: any) => cb.books)
-        .filter(Boolean) // This removes any null/undefined entries if a book was deleted
+        .filter(Boolean) 
     : [];
 
   return (
     <MainLayout
-      title={course?.official_code}
-      subtitle={course?.title}
+      title={course?.official_code || 'Loading...'}
+      subtitle={course?.title || ''}
     >
       <div className="bg-card rounded-xl shadow-card overflow-x-auto">
         <Table className="text-sm">
@@ -95,9 +94,15 @@ export default function CourseDetailPage() {
           </TableHeader>
 
           <TableBody>
-            {!loading &&
+            {loading ? (
+              <TableRow>
+                <TableCell colSpan={7} className="text-center py-10">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+                </TableCell>
+              </TableRow>
+            ) : books.length > 0 ? (
               books.map((b: any, i: number) => (
-                <TableRow key={b.id}>
+                <TableRow key={b.id || i}>
                   <TableCell>{i + 1}</TableCell>
                   <TableCell>{b.author ?? <EmptyText />}</TableCell>
                   <TableCell>{b.title}</TableCell>
@@ -106,9 +111,8 @@ export default function CourseDetailPage() {
                   <TableCell>{b.call_number ?? <EmptyText />}</TableCell>
                   <TableCell>1</TableCell>
                 </TableRow>
-              ))}
-
-            {!loading && books.length === 0 && (
+              ))
+            ) : (
               <TableRow>
                 <TableCell
                   colSpan={7}

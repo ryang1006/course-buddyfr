@@ -1,200 +1,140 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
-import { 
-  Book, Course, DeletedItem, 
-  generateBooks, generateCourses, generateDeletedItems,
-  getCourseStatus, getComplianceStats, getDepartmentBookCounts
-} from '@/lib/mockData';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { supabase } from '@/lib/supabaseClient';
+
+// --- ADAPTED TYPES (Matches your UI requirements) ---
+export interface Course {
+  id: string;
+  code: string;       // UI expects 'code' instead of 'official_code'
+  name: string;       // UI expects 'name' instead of 'title'
+  program: string;    // UI expects 'program' instead of 'department[]'
+  department: string[];
+  course_type: string;
+  assignedBookIds: string[]; // Dashboard needs this to check compliance
+  updated_at?: string;
+}
+
+export interface Book {
+  id: string;
+  title: string;
+  author: string | null;
+  publisher: string | null;
+  year: number | null;
+  call_number: string | null;
+  accession_number: string | null;
+  source_type: string;
+}
 
 interface DataContextType {
-  books: Book[];
   courses: Course[];
-  deletedItems: DeletedItem[];
-  
-  // Book operations
-  addBook: (book: Omit<Book, 'id' | 'status'>) => void;
-  updateBook: (id: string, book: Partial<Book>) => void;
-  deleteBook: (id: string, deletedBy: string) => void;
-  
-  // Course operations
-  addCourse: (course: Omit<Course, 'id'>) => void;
-  updateCourse: (id: string, course: Partial<Course>) => void;
-  deleteCourse: (id: string, deletedBy: string) => void;
-  assignBookToCourse: (courseId: string, bookId: string) => void;
-  removeBookFromCourse: (courseId: string, bookId: string) => void;
-  
-  // Recycle bin operations
-  restoreItem: (id: string) => void;
-  permanentlyDeleteItem: (id: string) => void;
-  emptyRecycleBin: () => void;
-  
-  // Import operations
-  importBooks: (books: Omit<Book, 'id' | 'status'>[]) => void;
-  
-  // Stats
-  getStats: () => ReturnType<typeof getComplianceStats>;
-  getDepartmentStats: () => ReturnType<typeof getDepartmentBookCounts>;
-  getCourseStatusFn: (course: Course) => ReturnType<typeof getCourseStatus>;
+  books: Book[];
+  loading: boolean;
+  refreshData: () => Promise<void>;
+  getStats: () => { total: number; complete: number; incomplete: number; outdated: number; };
+  getDepartmentStats: () => { name: string; total: number; complete: number; }[];
+  getCourseStatusFn: (status: string) => Course[];
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
-export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [books, setBooks] = useState<Book[]>(generateBooks);
-  const [courses, setCourses] = useState<Course[]>(generateCourses);
-  const [deletedItems, setDeletedItems] = useState<DeletedItem[]>(generateDeletedItems);
+export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [books, setBooks] = useState<Book[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Book operations
-  const addBook = (book: Omit<Book, 'id' | 'status'>) => {
-    const newBook: Book = {
-      ...book,
-      id: `b${Date.now()}`,
-      status: 'available',
-    };
-    setBooks(prev => [...prev, newBook]);
+  const refreshData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [coursesRes, booksRes, linksRes] = await Promise.all([
+        supabase.from('courses').select('*').order('official_code'),
+        supabase.from('books').select('*'),
+        supabase.from('course_books').select('course_id, book_id')
+      ]);
+
+      if (coursesRes.error) throw coursesRes.error;
+      if (booksRes.error) throw booksRes.error;
+      if (linksRes.error) throw linksRes.error;
+
+      const rawCourses = coursesRes.data || [];
+      const rawBooks = booksRes.data || [];
+      const rawLinks = linksRes.data || [];
+
+      // --- ADAPTER LOGIC: Transform Supabase rows to UI-friendly objects ---
+      const transformedCourses: Course[] = rawCourses.map(rc => {
+        // Find links using either the official_code or the UUID
+        const links = rawLinks.filter(l => 
+          l.course_id === rc.official_code || l.course_id === rc.id
+        );
+        
+        return {
+          id: rc.id,
+          code: rc.official_code,           // Map official_code -> code
+          name: rc.title,                   // Map title -> name
+          program: rc.department?.[0] || 'Unknown', // Map first dept -> program
+          department: rc.department || [],
+          course_type: rc.course_type,
+          assignedBookIds: links.map(l => l.book_id), // Provide the ID list for status checks
+          updated_at: rc.updated_at
+        };
+      });
+
+      setCourses(transformedCourses);
+      setBooks(rawBooks);
+    } catch (error) {
+      console.error('Data loading error:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshData();
+  }, [refreshData]);
+
+  // --- STATS HELPER FUNCTIONS ---
+
+  const getStats = () => {
+    const total = courses.length;
+    // Complete = at least 1 book assigned
+    const complete = courses.filter(c => c.assignedBookIds.length > 0).length;
+    const incomplete = total - complete;
+    const outdated = 0; // Placeholder for year-based logic
+
+    return { total, complete, incomplete, outdated };
   };
 
-  const updateBook = (id: string, updates: Partial<Book>) => {
-    setBooks(prev => prev.map(b => b.id === id ? { ...b, ...updates } : b));
-  };
-
-  const deleteBook = (id: string, deletedBy: string) => {
-    const book = books.find(b => b.id === id);
-    if (book) {
-      // Remove from any courses
-      setCourses(prev => prev.map(c => ({
-        ...c,
-        assignedBookIds: c.assignedBookIds.filter(bid => bid !== id)
-      })));
-      
-      // Add to deleted items
-      const deletedItem: DeletedItem = {
-        id: `d${Date.now()}`,
-        name: book.title,
-        type: 'book',
-        deletedAt: new Date(),
-        deletedBy,
-        originalData: book,
+  const getDepartmentStats = () => {
+    // Grouping stats by the first department entry (program)
+    const depts = Array.from(new Set(courses.map(c => c.program)));
+    return depts.map(dept => {
+      const deptCourses = courses.filter(c => c.program === dept);
+      return {
+        name: dept,
+        total: deptCourses.length,
+        complete: deptCourses.filter(c => c.assignedBookIds.length > 0).length
       };
-      setDeletedItems(prev => [...prev, deletedItem]);
-      
-      // Remove from books
-      setBooks(prev => prev.filter(b => b.id !== id));
+    });
+  };
+
+  const getCourseStatusFn = (status: string) => {
+    switch (status) {
+      case 'complete': return courses.filter(c => c.assignedBookIds.length > 0);
+      case 'incomplete': return courses.filter(c => c.assignedBookIds.length === 0);
+      default: return courses;
     }
   };
-
-  // Course operations
-  const addCourse = (course: Omit<Course, 'id'>) => {
-    const newCourse: Course = {
-      ...course,
-      id: `c${Date.now()}`,
-    };
-    setCourses(prev => [...prev, newCourse]);
-  };
-
-  const updateCourse = (id: string, updates: Partial<Course>) => {
-    setCourses(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
-  };
-
-  const deleteCourse = (id: string, deletedBy: string) => {
-    const course = courses.find(c => c.id === id);
-    if (course) {
-      const deletedItem: DeletedItem = {
-        id: `d${Date.now()}`,
-        name: `${course.code} - ${course.name}`,
-        type: 'course',
-        deletedAt: new Date(),
-        deletedBy,
-        originalData: course,
-      };
-      setDeletedItems(prev => [...prev, deletedItem]);
-      setCourses(prev => prev.filter(c => c.id !== id));
-    }
-  };
-
-  const assignBookToCourse = (courseId: string, bookId: string) => {
-    setCourses(prev => prev.map(c => {
-      if (c.id === courseId && !c.assignedBookIds.includes(bookId)) {
-        return { ...c, assignedBookIds: [...c.assignedBookIds, bookId] };
-      }
-      return c;
-    }));
-    setBooks(prev => prev.map(b => b.id === bookId ? { ...b, status: 'assigned' } : b));
-  };
-
-  const removeBookFromCourse = (courseId: string, bookId: string) => {
-    setCourses(prev => prev.map(c => {
-      if (c.id === courseId) {
-        return { ...c, assignedBookIds: c.assignedBookIds.filter(id => id !== bookId) };
-      }
-      return c;
-    }));
-    
-    // Check if book is still assigned to any course
-    const stillAssigned = courses.some(c => 
-      c.id !== courseId && c.assignedBookIds.includes(bookId)
-    );
-    if (!stillAssigned) {
-      setBooks(prev => prev.map(b => b.id === bookId ? { ...b, status: 'available' } : b));
-    }
-  };
-
-  // Recycle bin operations
-  const restoreItem = (id: string) => {
-    const item = deletedItems.find(d => d.id === id);
-    if (item) {
-      if (item.type === 'book') {
-        setBooks(prev => [...prev, item.originalData as Book]);
-      } else {
-        setCourses(prev => [...prev, item.originalData as Course]);
-      }
-      setDeletedItems(prev => prev.filter(d => d.id !== id));
-    }
-  };
-
-  const permanentlyDeleteItem = (id: string) => {
-    setDeletedItems(prev => prev.filter(d => d.id !== id));
-  };
-
-  const emptyRecycleBin = () => {
-    setDeletedItems([]);
-  };
-
-  // Import operations
-  const importBooks = (newBooks: Omit<Book, 'id' | 'status'>[]) => {
-    const booksToAdd: Book[] = newBooks.map((book, index) => ({
-      ...book,
-      id: `b${Date.now()}_${index}`,
-      status: 'available' as const,
-    }));
-    setBooks(prev => [...prev, ...booksToAdd]);
-  };
-
-  // Stats
-  const getStats = () => getComplianceStats(courses, books);
-  const getDepartmentStats = () => getDepartmentBookCounts(courses, books);
-  const getCourseStatusFn = (course: Course) => getCourseStatus(course, books);
 
   return (
-    <DataContext.Provider value={{
-      books,
-      courses,
-      deletedItems,
-      addBook,
-      updateBook,
-      deleteBook,
-      addCourse,
-      updateCourse,
-      deleteCourse,
-      assignBookToCourse,
-      removeBookFromCourse,
-      restoreItem,
-      permanentlyDeleteItem,
-      emptyRecycleBin,
-      importBooks,
-      getStats,
-      getDepartmentStats,
-      getCourseStatusFn,
-    }}>
+    <DataContext.Provider 
+      value={{ 
+        courses, 
+        books, 
+        loading, 
+        refreshData, 
+        getStats, 
+        getDepartmentStats, 
+        getCourseStatusFn 
+      }}
+    >
       {children}
     </DataContext.Provider>
   );
