@@ -92,7 +92,6 @@ export default function CoursesPage() {
     <MainLayout title='Courses'>
       <div className="p-6 space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <h1 className="text-2xl font-bold">Courses</h1>
           
           {/* Search Bar */}
           <div className="relative w-full md:w-80">
