@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
+import Select from 'react-select'; //
 import {
   Table,
   TableBody,
@@ -10,7 +11,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-
 /*helpers */
 const EmptyText = () => (
   <span className="text-gray-400 italic select-none">empty</span>
@@ -37,6 +37,8 @@ const TruncatedCell = ({
 
 export default function BooksPage() {
   const [books, setBooks] = useState<any[]>([]);
+  const [courses, setCourses] = useState<any[]>([]); // New: for the dropdown
+  const [selectedCourses, setSelectedCourses] = useState<any[]>([]); // New: for the form
   const [selected, setSelected] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [sortColumn, setSortColumn] = useState('created_at');
@@ -44,32 +46,29 @@ export default function BooksPage() {
 
   const [mode, setMode] = useState<'view' | 'add' | 'edit' | null>(null);
   const [form, setForm] = useState<any>({});
+  const [isSaving, setIsSaving] = useState(false); // New: for loading states
 
-  /*fetch*/
-  const fetchBooks = async () => {
-    let query = supabase
-      .from('books')
-      .select('*')
-      .order(sortColumn, { ascending: sortAsc });
-
+  // Fetch Books and Courses
+  const fetchData = async () => {
+    // Fetch Books
+    let bookQuery = supabase.from('books').select('*').order(sortColumn, { ascending: sortAsc });
     if (search) {
-      query = query.or(
-        `title.ilike.%${search}%,author.ilike.%${search}%,isbn.ilike.%${search}%`
-      );
+      bookQuery = bookQuery.or(`title.ilike.%${search}%,author.ilike.%${search}%,isbn.ilike.%${search}%`);
     }
+    const { data: bData } = await bookQuery;
+    setBooks(bData || []);
 
-    const { data, error } = await query;
-
-    if (error) {
-      toast.error('Failed to load books');
-      return;
+    // Fetch Courses for the dropdown
+    const { data: cData } = await supabase.from('courses').select('official_code, title').order('official_code');
+    if (cData) {
+      setCourses(cData.map(c => ({
+        value: c.official_code,
+        label: `${c.official_code} - ${c.title}`
+      })));
     }
-
-    setBooks(data || []);
   };
-
   useEffect(() => {
-    fetchBooks();
+    fetchData();
   }, [search, sortColumn, sortAsc]);
 
   /* Helpr*/
@@ -93,33 +92,63 @@ export default function BooksPage() {
     setMode('view');
   };
 
-  const openEdit = () => {
-    setForm(books.find((b) => b.id === selected[0]));
-    setMode('edit');
-  };
+  const openEdit = async () => {
+      const book = books.find((b) => b.id === selected[0]);
+      setForm(book);
+      
+      // Fetch existing links for this book
+      const { data } = await supabase.from('course_books').select('course_id').eq('book_id', book.id);
+      if (data) {
+        const existing = data.map(link => courses.find(opt => opt.value === link.course_id)).filter(Boolean);
+        setSelectedCourses(existing);
+      }
+      setMode('edit');
+    };
 
   const openAdd = () => {
-    setForm({});
-    setMode('add');
-  };
+      setForm({});
+      setSelectedCourses([]); // Clear selection
+      setMode('add');
+    };
 
   const saveBook = async () => {
-    const action =
-      mode === 'add'
-        ? supabase.from('books').insert([form])
-        : supabase.from('books').update(form).eq('id', form.id);
+      setIsSaving(true);
+      try {
+        // 1. Save or Update the Book
+        const action = mode === 'add'
+          ? supabase.from('books').insert([form]).select().single()
+          : supabase.from('books').update(form).eq('id', form.id).select().single();
 
-    const { error } = await action;
+        const { data: bookData, error: bookError } = await action;
+        if (bookError) throw bookError;
 
-    if (error) {
-      toast.error('Save failed');
-      return;
-    }
+        // 2. Sync Course Links (Delete old, insert new)
+        const bookId = bookData.id;
+        
+        // Clear old links if editing
+        if (mode === 'edit') {
+          await supabase.from('course_books').delete().eq('book_id', bookId);
+        }
 
-    toast.success('Saved successfully');
-    setMode(null);
-    fetchBooks();
-  };
+        // Insert selected links
+        if (selectedCourses.length > 0) {
+          const links = selectedCourses.map(c => ({
+            course_id: c.value,
+            book_id: bookId
+          }));
+          const { error: linkError } = await supabase.from('course_books').insert(links);
+          if (linkError) throw linkError;
+        }
+
+        toast.success('Saved successfully');
+        setMode(null);
+        fetchData();
+      } catch (err: any) {
+        toast.error(err.message || 'Save failed');
+      } finally {
+        setIsSaving(false);
+      }
+    };
 
 const deleteBooks = async () => {
   try {
@@ -165,7 +194,7 @@ const { error: insertError } = await supabase
 
     toast.success('Deleted successfully');
     setSelected([]);
-    fetchBooks();
+    fetchData(); // Changed from fetchBooks()
   } catch (err) {
     toast.error('Unexpected error');
   }
@@ -283,57 +312,58 @@ const { error: insertError } = await supabase
 
     {/* MODAL */}
 {mode && (
-  <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center">
-    <div className="bg-white rounded-xl p-6 w-[500px] space-y-3">
-      <h2 className="text-lg font-semibold capitalize">{mode} Book</h2>
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl p-6 w-[550px] max-h-[90vh] overflow-y-auto space-y-4">
+            <h2 className="text-lg font-semibold capitalize">{mode} Book</h2>
 
-      {[
-        'title',
-        'author',
-        'publisher',
-        'isbn',
-        'call_number',
-        'source_type',
-        'year',
-        'accession_number',
-      ].map((f) => (
-        <input
-          key={f}
-          type={f === 'year' ? 'number' : 'text'} // number input for year
-          disabled={mode === 'view'}
-          placeholder={f.replace('_', ' ')}
-          className="border rounded px-3 py-1 w-full"
-          value={form[f] ?? ''}
-          onChange={(e) =>
-            setForm({
-              ...form,
-              [f]:
-                f === 'year' ? parseInt(e.target.value) || '' : e.target.value,
-            })
-          }
-        />
-      ))}
+            {/* Standard Form Fields */}
+            <div className="grid grid-cols-2 gap-3">
+               {['title', 'author', 'publisher', 'isbn', 'call_number', 'source_type', 'year', 'accession_number'].map((f) => (
+                <div key={f} className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-gray-400">{f.replace('_', ' ')}</label>
+                  <input
+                    type={f === 'year' ? 'number' : 'text'}
+                    disabled={mode === 'view'}
+                    className="border rounded px-3 py-1 w-full text-sm"
+                    value={form[f] ?? ''}
+                    onChange={(e) => setForm({ ...form, [f]: f === 'year' ? parseInt(e.target.value) || '' : e.target.value })}
+                  />
+                </div>
+              ))}
+            </div>
 
-      <div className="flex justify-end gap-2 pt-2">
-        <button
-          onClick={() => setMode(null)}
-          className="px-3 py-1 rounded border"
-        >
-          Close
-        </button>
+            {/* NEW: Course Linker */}
+            <div className="pt-2 border-t">
+              <label className="block text-sm font-bold text-blue-600 mb-1">
+                Link to Courses {selectedCourses.length > 0 && `(${selectedCourses.length})`}
+              </label>
+              <Select
+                isMulti
+                options={courses}
+                value={selectedCourses}
+                onChange={(val) => setSelectedCourses(val as any)}
+                placeholder="Search courses (e.g. IT101)..."
+                isDisabled={mode === 'view'}
+                className="text-sm"
+              />
+              <p className="text-[10px] text-gray-500 mt-1">Links this book to curriculum compliance reports.</p>
+            </div>
 
-        {mode !== 'view' && (
-          <button
-            onClick={saveBook}
-            className="px-3 py-1 rounded bg-purple-600 text-white"
-          >
-            Save
-          </button>
-        )}
-      </div>
-    </div>
-  </div>
-)}
+            <div className="flex justify-end gap-2 pt-4">
+              <button onClick={() => setMode(null)} className="px-4 py-1.5 rounded border text-sm">Close</button>
+              {mode !== 'view' && (
+                <button 
+                  onClick={saveBook} 
+                  disabled={isSaving}
+                  className="px-4 py-1.5 rounded bg-purple-600 text-white text-sm flex items-center gap-2"
+                >
+                  {isSaving ? 'Saving...' : 'Save Book & Links'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </MainLayout>
   );
 }
