@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils';
 
 export default function DashboardPage() {
   // Destructured 'books' to fix the "Cannot find name 'books'" error
-  const { courses, books, loading, getStats, getDepartmentStats } = useData();
+  const { courses, books, loading, getStats, getDepartmentStats, totalBookCount } = useData();
   const [searchQuery, setSearchQuery] = useState('');
   const [deptFilter, setDeptFilter] = useState('all');
 
@@ -66,7 +66,7 @@ export default function DashboardPage() {
     },
     { 
       title: 'Library Assets', 
-      value: books.length, 
+      value: totalBookCount, 
       icon: Library, 
       variant: 'primary' as const,
       description: 'Total unique titles'
@@ -107,7 +107,7 @@ export default function DashboardPage() {
         <ComplianceChart 
           complete={statsData.complete} 
           incomplete={statsData.incomplete} 
-          outdated={0} // Fixed: Added missing required outdated prop
+          outdated={statsData.outdated} // Fixed: Added missing required outdated prop
         />
         <DepartmentChart data={chartDeptData} />
       </div>

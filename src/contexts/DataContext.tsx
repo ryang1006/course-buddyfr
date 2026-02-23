@@ -1,15 +1,15 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
-// --- ADAPTED TYPES (Matches your UI requirements) ---
+// --- ADAPTED TYPES ---
 export interface Course {
   id: string;
-  code: string;       // UI expects 'code' instead of 'official_code'
-  name: string;       // UI expects 'name' instead of 'title'
-  program: string;    // UI expects 'program' instead of 'department[]'
+  code: string;       
+  name: string;       
+  program: string;    
   department: string[];
   course_type: string;
-  assignedBookIds: string[]; // Dashboard needs this to check compliance
+  assignedBookIds: string[]; 
   updated_at?: string;
 }
 
@@ -24,14 +24,20 @@ export interface Book {
   source_type: string;
 }
 
+export interface CourseBook {
+  course_id: string;
+  book_id: string;
+}
+
 interface DataContextType {
   courses: Course[];
   books: Book[];
+  totalBookCount: number; // Added to handle the 1000+ limit
   loading: boolean;
   refreshData: () => Promise<void>;
   getStats: () => { total: number; complete: number; incomplete: number; outdated: number; };
   getDepartmentStats: () => { name: string; total: number; complete: number; }[];
-  getCourseStatusFn: (status: string) => Course[];
+  getCourseStatusFn: (course: Course) => 'complete' | 'incomplete' | 'outdated';
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -39,15 +45,19 @@ const DataContext = createContext<DataContextType | undefined>(undefined);
 export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [courses, setCourses] = useState<Course[]>([]);
   const [books, setBooks] = useState<Book[]>([]);
+  const [courseBooks, setCourseBooks] = useState<CourseBook[]>([]);
+  const [totalBookCount, setTotalBookCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const refreshData = useCallback(async () => {
     setLoading(true);
     try {
-      const [coursesRes, booksRes, linksRes] = await Promise.all([
+      // Parallel fetch for speed
+      const [coursesRes, booksRes, linksRes, countRes] = await Promise.all([
         supabase.from('courses').select('*').order('official_code'),
-        supabase.from('books').select('*'),
-        supabase.from('course_books').select('course_id, book_id')
+        supabase.from('books').select('*').limit(1000), // List limit
+        supabase.from('course_books').select('*'),
+        supabase.from('books').select('*', { count: 'exact', head: true }) // Total count
       ]);
 
       if (coursesRes.error) throw coursesRes.error;
@@ -58,27 +68,34 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const rawBooks = booksRes.data || [];
       const rawLinks = linksRes.data || [];
 
-      // --- ADAPTER LOGIC: Transform Supabase rows to UI-friendly objects ---
+      // Update basic states
+      setBooks(rawBooks);
+      setCourseBooks(rawLinks);
+      setTotalBookCount(countRes.count || 0);
+
+      if (countRes.count != null){
+        setTotalBookCount(countRes.count)
+      }
+
+      // --- ADAPTER LOGIC ---
       const transformedCourses: Course[] = rawCourses.map(rc => {
-        // Find links using either the official_code or the UUID
         const links = rawLinks.filter(l => 
           l.course_id === rc.official_code || l.course_id === rc.id
         );
         
         return {
           id: rc.id,
-          code: rc.official_code,           // Map official_code -> code
-          name: rc.title,                   // Map title -> name
-          program: rc.department?.[0] || 'Unknown', // Map first dept -> program
+          code: rc.official_code,
+          name: rc.title,
+          program: rc.department?.[0] || 'Unknown',
           department: rc.department || [],
           course_type: rc.course_type,
-          assignedBookIds: links.map(l => l.book_id), // Provide the ID list for status checks
+          assignedBookIds: links.map(l => l.book_id),
           updated_at: rc.updated_at
         };
       });
 
       setCourses(transformedCourses);
-      setBooks(rawBooks);
     } catch (error) {
       console.error('Data loading error:', error);
     } finally {
@@ -90,37 +107,32 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     refreshData();
   }, [refreshData]);
 
-  // --- STATS HELPER FUNCTIONS ---
-
   const getStats = () => {
     const total = courses.length;
-    // Complete = at least 1 book assigned
-    const complete = courses.filter(c => c.assignedBookIds.length > 0).length;
-    const incomplete = total - complete;
-    const outdated = 0; // Placeholder for year-based logic
+    const complete = courses.filter(c => c.assignedBookIds.length >= 5).length;
+    const incomplete = courses.filter(c => c.assignedBookIds.length > 0 && c.assignedBookIds.length < 5).length;
+    const outdated = total - (complete + incomplete);
 
     return { total, complete, incomplete, outdated };
   };
 
   const getDepartmentStats = () => {
-    // Grouping stats by the first department entry (program)
     const depts = Array.from(new Set(courses.map(c => c.program)));
     return depts.map(dept => {
       const deptCourses = courses.filter(c => c.program === dept);
       return {
         name: dept,
         total: deptCourses.length,
-        complete: deptCourses.filter(c => c.assignedBookIds.length > 0).length
+        complete: deptCourses.filter(c => c.assignedBookIds.length >= 5).length
       };
     });
   };
 
-  const getCourseStatusFn = (status: string) => {
-    switch (status) {
-      case 'complete': return courses.filter(c => c.assignedBookIds.length > 0);
-      case 'incomplete': return courses.filter(c => c.assignedBookIds.length === 0);
-      default: return courses;
-    }
+  const getCourseStatusFn = (course: Course) => {
+    const count = course.assignedBookIds.length;
+    if (count >= 5) return 'complete';
+    if (count > 0) return 'incomplete';
+    return 'outdated';
   };
 
   return (
@@ -128,6 +140,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       value={{ 
         courses, 
         books, 
+        totalBookCount,
         loading, 
         refreshData, 
         getStats, 

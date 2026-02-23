@@ -92,7 +92,15 @@ export default function CoursesPage() {
     <MainLayout title='Courses'>
       <div className="p-6 space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          
+          <div className="flex items-center gap-3">
+                  <h1 className="text-2xl font-bold">Courses</h1>
+          {/* New: Status Badge with counts */}
+              <span className="bg-purple-100 text-purple-700 text-xs font-medium px-2.5 py-0.5 rounded-full border border-purple-200">
+                {filteredCourses.length === courses.length 
+                  ? `${courses.length} total` 
+                  : `${filteredCourses.length} of ${courses.length} found`}
+            </span>
+          </div>
           {/* Search Bar */}
           <div className="relative w-full md:w-80">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />

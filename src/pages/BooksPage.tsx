@@ -206,20 +206,27 @@ const { error: insertError } = await supabase
   return (
     <MainLayout title="Book Master" subtitle="Manage your book collection">
       <div className="relative h-[calc(100vh-180px)] overflow-y-auto">
+
         <div
-          className="sticky top-4 z-30
+        className="sticky top-4 z-30
             bg-white/95 backdrop-blur
             border rounded-xl shadow-lg
             px-4 py-3 mb-3
             flex flex-wrap gap-3 items-center"
         >
-          <input
-            placeholder="Search title, author, ISBN"
-            className="border rounded px-3 py-1 text-sm w-64"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-
+          <div className="flex flex-col">
+            <input
+              placeholder="Search title, author, ISBN"
+              className="border rounded px-3 py-1 text-sm w-64"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {/* Record count indicator */}
+            <span className="text-[10px] text-muted-foreground mt-1 ml-1">
+              Showing {books.length} records
+            </span>
+          </div>
+      <div className="ml-auto flex gap-2"></div>
           <div className="ml-auto flex gap-2">
             <button
               onClick={openView}
