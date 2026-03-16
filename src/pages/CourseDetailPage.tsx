@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { supabase } from '@/lib/supabaseClient';
@@ -11,6 +11,9 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
+import { Edit } from 'lucide-react';
+import CourseEditModal from '@/components/courses/CourseEditModal';
 
 /* ---------------- Helpers ---------------- */
 
@@ -21,51 +24,56 @@ const EmptyText = () => (
 /* ---------------- Component ---------------- */
 
 export default function CourseDetailPage() {
-  // Use 'id' to match the URL parameter: /courses/:id
   const { id } = useParams<{ id: string }>(); 
   const [course, setCourse] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  
+  // State for the Edit Modal
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
-  useEffect(() => {
-    // If no ID is present, don't bother fetching
+  // Extracted fetch logic so we can call it after closing the edit modal
+  const fetchCourse = useCallback(async () => {
     if (!id) return;
 
-    const fetchCourse = async () => {
-      try {
-        setLoading(true);
-        console.log("Starting Supabase request for UUID:", id);
+    try {
+      setLoading(true);
+      console.log("Starting Supabase request for UUID:", id);
 
-        const { data, error } = await supabase
-          .from('courses')
-          .select(`
-            id,
-            official_code,
-            title,
-            department,
-            course_books (
-              book_id,
-              books (*)
-            )
-          `)
-          .eq('id', id)
-          .single();
+      // CRITICAL UPDATE: Added aliases and manually_edited to the select query
+      const { data, error } = await supabase
+        .from('courses')
+        .select(`
+          id,
+          official_code,
+          title,
+          department,
+          aliases,
+          manually_edited,
+          course_books (
+            book_id,
+            books (*)
+          )
+        `)
+        .eq('id', id)
+        .single();
 
-        if (error) throw error;
-        
-        if (data) {
-          console.log("Raw Supabase Data:", data);
-          setCourse(data);
-        }
-      } catch (err: any) {
-        console.error("Detailed Fetch Error:", err);
-        toast.error(err.message || 'Failed to load course');
-      } finally {
-        setLoading(false);
+      if (error) throw error;
+      
+      if (data) {
+        console.log("Raw Supabase Data:", data);
+        setCourse(data);
       }
-    };
+    } catch (err: any) {
+      console.error("Detailed Fetch Error:", err);
+      toast.error(err.message || 'Failed to load course');
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
 
+  useEffect(() => {
     fetchCourse();
-  }, [id]); // Dependency should be 'id'
+  }, [fetchCourse]);
 
   // Derived state: Extract the books from the nested course_books relationship
   const books = course?.course_books
@@ -79,6 +87,18 @@ export default function CourseDetailPage() {
       title={course?.official_code || 'Loading...'}
       subtitle={course?.title || ''}
     >
+      {/* Action Bar */}
+      <div className="flex justify-end mb-4">
+        <Button 
+          onClick={() => setIsEditModalOpen(true)}
+          disabled={!course || loading}
+          className="flex items-center gap-2"
+        >
+          <Edit className="w-4 h-4" />
+          Edit Course
+        </Button>
+      </div>
+
       <div className="bg-card rounded-xl shadow-card overflow-x-auto">
         <Table className="text-sm">
           <TableHeader className="bg-purple-100">
@@ -109,7 +129,7 @@ export default function CourseDetailPage() {
                   <TableCell>{b.publisher ?? <EmptyText />}</TableCell>
                   <TableCell>{b.year ?? <EmptyText />}</TableCell>
                   <TableCell>{b.call_number ?? <EmptyText />}</TableCell>
-                  <TableCell>1</TableCell>
+                  <TableCell>{b.volume_count ?? 1}</TableCell>
                 </TableRow>
               ))
             ) : (
@@ -125,6 +145,18 @@ export default function CourseDetailPage() {
           </TableBody>
         </Table>
       </div>
+
+      {/* Render Modal */}
+      {course && (
+        <CourseEditModal
+          isOpen={isEditModalOpen}
+          onClose={() => {
+            setIsEditModalOpen(false);
+            fetchCourse(); // Refresh the page data automatically after saving!
+          }}
+          course={course}
+        />
+      )}
     </MainLayout>
   );
 }
